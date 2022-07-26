@@ -83,17 +83,25 @@ public class TransportGetWRRWeightsAction extends TransportClusterManagerNodeRea
         if (request.local()) {
             DiscoveryNode localNode = state.getNodes().getLocalNode();
 
-            if (localNode.isDataNode() && localNode.getAttributes().containsKey("zone")) {
+            boolean weighAwayEnabled = false;
+            boolean decommissionEnabled = false;
+            if (localNode.isDataNode() && localNode.getAttributes().containsKey("zone"))
+            {
                 Object weight = null;
                 String zone = localNode.getAttributes().get("zone");
                 //Get weight for the zone from weighted round robin metadata
+                if (weightedRoundRobinMetadata.getWrrWeight()!=null && weightedRoundRobinMetadata.getWrrWeight().isEmpty())
+                {
+                    weight = 1;
+                }
                 for (WRRWeight wrrWeight : weightedRoundRobinMetadata.getWrrWeight()) {
                     if (wrrWeight.attributeName() == "zone") {
                         weight = wrrWeight.weights().get(zone);
-
+                        weighAwayEnabled = true;
+                        break;
                     }
                 }
-                listener.onResponse(new ClusterGetWRRWeightsResponse(weight));
+                listener.onResponse(new ClusterGetWRRWeightsResponse(weight, weighAwayEnabled, decommissionEnabled));
             }
         } else if (weightedRoundRobinMetadata != null) {
             listener.onResponse(new ClusterGetWRRWeightsResponse(weightedRoundRobinMetadata.getWrrWeight()));

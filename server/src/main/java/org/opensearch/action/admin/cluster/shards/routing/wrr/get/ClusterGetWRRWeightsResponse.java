@@ -32,9 +32,13 @@ import static org.opensearch.common.xcontent.XContentParserUtils.ensureExpectedT
 public class ClusterGetWRRWeightsResponse extends ActionResponse implements ToXContentObject {
     private Object localNodeWeight;
     private List<WRRWeight> wrrWeights;
+    private boolean weighAwayEnabled;
+    private boolean decommissionEnabled;
 
-    ClusterGetWRRWeightsResponse(Object localNodeWeight) throws IOException {
+    ClusterGetWRRWeightsResponse(Object localNodeWeight, boolean weighAwayEnabled, boolean decommissionEnabled) throws IOException {
         this.localNodeWeight = localNodeWeight;
+        this.weighAwayEnabled = weighAwayEnabled;
+        this.decommissionEnabled = decommissionEnabled;
     }
 
     ClusterGetWRRWeightsResponse(List<WRRWeight> wrrWeights)
@@ -67,14 +71,29 @@ public class ClusterGetWRRWeightsResponse extends ActionResponse implements ToXC
     @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
         builder.startObject();
-        for(WRRWeight wt : this.wrrWeights)
+        if(this.wrrWeights!=null && !this.wrrWeights.isEmpty() && localNodeWeight==null)
         {
-            builder.startObject(wt.attributeName());
-            for (Map.Entry<String, Object> entry : wt.weights().entrySet()) {
-                builder.field(entry.getKey(), entry.getValue());
+            for(WRRWeight wt : this.wrrWeights)
+            {
+                builder.startObject(wt.attributeName());
+                for (Map.Entry<String, Object> entry : wt.weights().entrySet()) {
+                    builder.field(entry.getKey(), entry.getValue());
+                }
+                builder.endObject();
             }
-            builder.endObject();
         }
+        else
+        {
+            builder.field("weight", localNodeWeight.toString());
+            builder.startObject("reason");
+
+            builder.field("weight_away",weighAwayEnabled ? 1:0);
+            builder.field("decommission", decommissionEnabled?1:0);
+            builder.endObject();
+
+        }
+
+
         builder.endObject();
 
 //        wrrWeights.toXContent(
@@ -85,6 +104,6 @@ public class ClusterGetWRRWeightsResponse extends ActionResponse implements ToXC
 
     public static ClusterGetWRRWeightsResponse fromXContent(XContentParser parser) throws IOException {
         ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
-        return new ClusterGetWRRWeightsResponse(WeightedRoundRobinMetadata.fromXContent(parser));
+        return new ClusterGetWRRWeightsResponse((List<WRRWeight>) WeightedRoundRobinMetadata.fromXContent(parser));
     }
 }
