@@ -31,9 +31,10 @@ import static org.opensearch.common.xcontent.XContentParserUtils.ensureExpectedT
  */
 public class ClusterGetWRRWeightsResponse extends ActionResponse implements ToXContentObject {
     private Object localNodeWeight;
-    private List<WRRWeight> wrrWeights;
+    private WRRWeight wrrWeights;
     private boolean weighAwayEnabled;
     private boolean decommissionEnabled;
+    private WeightedRoundRobinMetadata weightedRoundRobinMetadata;
 
     ClusterGetWRRWeightsResponse(Object localNodeWeight, boolean weighAwayEnabled, boolean decommissionEnabled) throws IOException {
         this.localNodeWeight = localNodeWeight;
@@ -41,16 +42,23 @@ public class ClusterGetWRRWeightsResponse extends ActionResponse implements ToXC
         this.decommissionEnabled = decommissionEnabled;
     }
 
-    ClusterGetWRRWeightsResponse(List<WRRWeight> wrrWeights)
+    ClusterGetWRRWeightsResponse(WRRWeight wrrWeights)
     {
         this.wrrWeights = wrrWeights;
 
     }
+    ClusterGetWRRWeightsResponse(WeightedRoundRobinMetadata metadata)
+    {
+        this.weightedRoundRobinMetadata = metadata;
+        this.wrrWeights = metadata.getWrrWeight();
+    }
 
 
     ClusterGetWRRWeightsResponse(StreamInput in) throws IOException {
-         this.localNodeWeight = in.read();
-         this.wrrWeights = in.readList(WRRWeight::new);
+//         this.localNodeWeight = in.read();
+//         this.weighAwayEnabled = in.readBoolean();
+//         this.decommissionEnabled = in.readBoolean();
+         this.wrrWeights = new WRRWeight(in);
     }
 
     /**
@@ -58,37 +66,46 @@ public class ClusterGetWRRWeightsResponse extends ActionResponse implements ToXC
      *
      * @return list or weights
      */
-    public List<WRRWeight> weights() {
+    public WRRWeight weights() {
         return this.wrrWeights;
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        out.writeList(wrrWeights);
-        out.writeInt((Integer) localNodeWeight);
+        if(wrrWeights!=null)
+        {
+            wrrWeights.writeTo(out);
+
+        }
+//        if(localNodeWeight!=null)
+//        {
+//            out.writeInt((Integer) localNodeWeight);
+//
+//        }
+//        out.writeBoolean(weighAwayEnabled);
+//        out.writeBoolean(decommissionEnabled);
     }
 
     @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
         builder.startObject();
-        if(this.wrrWeights!=null && !this.wrrWeights.isEmpty() && localNodeWeight==null)
+        if(this.wrrWeights!=null  && this.localNodeWeight==null)
         {
-            for(WRRWeight wt : this.wrrWeights)
-            {
-                builder.startObject(wt.attributeName());
-                for (Map.Entry<String, Object> entry : wt.weights().entrySet()) {
+                builder.startObject("awareness");
+                builder.startObject(wrrWeights.attributeName());
+                for (Map.Entry<String, Object> entry : wrrWeights.weights().entrySet()) {
                     builder.field(entry.getKey(), entry.getValue());
                 }
                 builder.endObject();
-            }
+                builder.endObject();
         }
         else
         {
-            builder.field("weight", localNodeWeight.toString());
+            builder.field("weight", this.localNodeWeight.toString());
             builder.startObject("reason");
 
-            builder.field("weight_away",weighAwayEnabled ? 1:0);
-            builder.field("decommission", decommissionEnabled?1:0);
+            builder.field("weight_away",this.weighAwayEnabled ? 1:0);
+            builder.field("decommission", this.decommissionEnabled?1:0);
             builder.endObject();
 
         }
@@ -104,6 +121,6 @@ public class ClusterGetWRRWeightsResponse extends ActionResponse implements ToXC
 
     public static ClusterGetWRRWeightsResponse fromXContent(XContentParser parser) throws IOException {
         ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
-        return new ClusterGetWRRWeightsResponse((List<WRRWeight>) WeightedRoundRobinMetadata.fromXContent(parser));
+        return new ClusterGetWRRWeightsResponse(WeightedRoundRobinMetadata.fromXContent(parser));
     }
 }

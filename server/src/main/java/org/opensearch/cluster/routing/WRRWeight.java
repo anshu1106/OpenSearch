@@ -8,9 +8,11 @@
 
 package org.opensearch.cluster.routing;
 
+import org.opensearch.common.bytes.BytesReference;
 import org.opensearch.common.io.stream.StreamInput;
 import org.opensearch.common.io.stream.StreamOutput;
 import org.opensearch.common.io.stream.Writeable;
+import org.opensearch.common.xcontent.XContentType;
 
 import java.io.IOException;
 import java.util.Map;
@@ -30,6 +32,11 @@ public class WRRWeight implements Writeable {
         this.attributeName = wrrWeight.attributeName();
         this.weights = wrrWeight.weights;
     }
+
+//    public WRRWeight(BytesReference config, XContentType xContentType) {
+//        this.config = Objects.requireNonNull(config);
+//        this.xContentType = Objects.requireNonNull(xContentType);
+//    }
 
     public WRRWeight(StreamInput in) throws IOException {
         attributeName = in.readString();

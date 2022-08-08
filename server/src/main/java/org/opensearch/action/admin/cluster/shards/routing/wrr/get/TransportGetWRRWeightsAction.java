@@ -14,6 +14,7 @@ import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.clustermanager.TransportClusterManagerNodeReadAction;
 import org.opensearch.cluster.ClusterState;
 import org.opensearch.cluster.block.ClusterBlockException;
+import org.opensearch.cluster.block.ClusterBlockLevel;
 import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.cluster.metadata.Metadata;
 
@@ -68,7 +69,8 @@ public class TransportGetWRRWeightsAction extends TransportClusterManagerNodeRea
 
     @Override
     protected ClusterBlockException checkBlock(ClusterGetWRRWeightsRequest request, ClusterState state) {
-        return null;
+
+        return state.blocks().globalBlockedException(ClusterBlockLevel.METADATA_READ);
     }
 
 
@@ -85,28 +87,29 @@ public class TransportGetWRRWeightsAction extends TransportClusterManagerNodeRea
 
             boolean weighAwayEnabled = false;
             boolean decommissionEnabled = false;
-            if (localNode.isDataNode() && localNode.getAttributes().containsKey("zone"))
-            {
-                Object weight = null;
+            Object weight = null;
+            //if (localNode.isDataNode() && localNode.getAttributes().containsKey("zone"))
+            if (localNode.getAttributes().containsKey("zone")) {
+
                 String zone = localNode.getAttributes().get("zone");
                 //Get weight for the zone from weighted round robin metadata
-                if (weightedRoundRobinMetadata.getWrrWeight()!=null && weightedRoundRobinMetadata.getWrrWeight().isEmpty())
-                {
+
+                if (weightedRoundRobinMetadata.getWrrWeight() == null) {
                     weight = 1;
                 }
-                for (WRRWeight wrrWeight : weightedRoundRobinMetadata.getWrrWeight()) {
-                    if (wrrWeight.attributeName() == "zone") {
-                        weight = wrrWeight.weights().get(zone);
-                        weighAwayEnabled = true;
-                        break;
-                    }
+                if (weightedRoundRobinMetadata.getWrrWeight().attributeName() == "zone") {
+                    weight = weightedRoundRobinMetadata.getWrrWeight().weights().get(zone);
+                    weighAwayEnabled = true;
+
                 }
-                listener.onResponse(new ClusterGetWRRWeightsResponse(weight, weighAwayEnabled, decommissionEnabled));
             }
+            listener.onResponse(new ClusterGetWRRWeightsResponse(weight, weighAwayEnabled, decommissionEnabled));
         } else if (weightedRoundRobinMetadata != null) {
             listener.onResponse(new ClusterGetWRRWeightsResponse(weightedRoundRobinMetadata.getWrrWeight()));
         }
 
     }
+
+
 }
 
