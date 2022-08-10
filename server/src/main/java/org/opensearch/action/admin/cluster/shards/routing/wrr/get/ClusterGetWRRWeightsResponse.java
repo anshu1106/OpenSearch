@@ -102,11 +102,11 @@ public class ClusterGetWRRWeightsResponse extends ActionResponse implements ToXC
         else
         {
             builder.field("weight", this.localNodeWeight.toString());
-            builder.startObject("reason");
-
-            builder.field("weight_away",this.weighAwayEnabled ? 1:0);
-            builder.field("decommission", this.decommissionEnabled?1:0);
-            builder.endObject();
+//            builder.startObject("reason");
+//
+//            builder.field("weight_away",this.weighAwayEnabled ? 1:0);
+//            builder.field("decommission", this.decommissionEnabled?1:0);
+//            builder.endObject();
 
         }
 

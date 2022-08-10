@@ -8,31 +8,41 @@
 
 package org.opensearch.cluster.metadata;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.opensearch.OpenSearchParseException;
 import org.opensearch.Version;
 import org.opensearch.cluster.AbstractNamedDiffable;
+import org.opensearch.cluster.Diff;
 import org.opensearch.cluster.NamedDiff;
+import org.opensearch.cluster.routing.WRRShardRoutingService;
 import org.opensearch.cluster.routing.WRRWeight;
+import org.opensearch.cluster.routing.WeightedRoundRobin;
+import org.opensearch.common.Strings;
 import org.opensearch.common.io.stream.StreamInput;
 import org.opensearch.common.io.stream.StreamOutput;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.common.xcontent.DeprecationHandler;
 import org.opensearch.common.xcontent.NamedXContentRegistry;
 import org.opensearch.common.xcontent.ToXContent;
 import org.opensearch.common.xcontent.XContentBuilder;
 import org.opensearch.common.xcontent.XContentHelper;
 import org.opensearch.common.xcontent.XContentParser;
+import org.opensearch.index.Index;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public class WeightedRoundRobinMetadata extends AbstractNamedDiffable<Metadata.Custom> implements Metadata.Custom {
+public class WeightedRoundRobinMetadata  extends AbstractNamedDiffable<Metadata.Custom> implements  Metadata.Custom {
+    private static final Logger logger = LogManager.getLogger(WeightedRoundRobinMetadata.class);
     public static final String TYPE = "wrr_shard_routing";
-    private  WRRWeight wrrWeight;
+    private   WRRWeight wrrWeight;
 
     public WRRWeight getWrrWeight() {
         return wrrWeight;
@@ -54,7 +64,7 @@ public class WeightedRoundRobinMetadata extends AbstractNamedDiffable<Metadata.C
     @Override
     public EnumSet<Metadata.XContentContext> context() {
         //TODO: Check if this needs to be changed
-        return Metadata.ALL_CONTEXTS;
+        return Metadata.API_AND_GATEWAY;
     }
 
     @Override
@@ -74,10 +84,14 @@ public class WeightedRoundRobinMetadata extends AbstractNamedDiffable<Metadata.C
     }
 
     public static NamedDiff<Metadata.Custom> readDiffFrom(StreamInput in) throws IOException {
+        logger.info("WeightedRoundRobinMetada::readDiffFrom");
+
         return readDiffFrom(Metadata.Custom.class, TYPE, in);
+        //return new WeightedRoundRobinMetadata.WeightedRoundRobinMetadataDiff(in);
     }
 
-    public static WRRWeight fromXContent(XContentParser parser) throws IOException {
+    public static WeightedRoundRobinMetadata fromXContent(XContentParser parser) throws IOException {
+        logger.info("WRR metadata from xcontent invoked");
         String attrKey = null;
         Object attrValue;
         String attributeName = null;
@@ -107,16 +121,44 @@ public class WeightedRoundRobinMetadata extends AbstractNamedDiffable<Metadata.C
                             attrValue = parser.text();
                             weights.put(attrKey, attrValue);
                         } else {
-                            throw new OpenSearchParseException("failed to parse attribute [{}], unknown type", attributeName);
+                            throw new OpenSearchParseException("failed to parse wrr metadata attribute [{}], unknown type", attributeName);
                         }
                     }
             }} else {
-                throw new OpenSearchParseException("failed to parse attribute [{}]", attributeName);
+                throw new OpenSearchParseException("failed to parse wrr metadata attribute [{}]", attributeName);
             }
         }
+        logger.info("WRR metadata fromxcontent completing");
+
         wrrWeight = new WRRWeight(attributeName, weights);
-        return wrrWeight;
-        }
+        logger.info("WRR metadata fromxcontent completed");
+
+        return new WeightedRoundRobinMetadata(wrrWeight);
+
+    }
+
+
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+
+        WeightedRoundRobinMetadata that = (WeightedRoundRobinMetadata) o;
+
+        //if (!name.equals(that.name)) return false;
+        boolean found = wrrWeight.equals(that.wrrWeight);
+        logger.info("WEightedRoundRobin::EQUALS");
+        logger.info(found);
+        return found;
+        //return false;
+    }
+
+    @Override
+    public int hashCode() {
+        return wrrWeight.hashCode();
+    }
+
 
 
     @Override
@@ -134,4 +176,11 @@ public class WeightedRoundRobinMetadata extends AbstractNamedDiffable<Metadata.C
         builder.endObject();
         builder.endObject();
     }
+    @Override
+    public String toString() {
+        return Strings.toString(this);
+    }
+
+
+
 }

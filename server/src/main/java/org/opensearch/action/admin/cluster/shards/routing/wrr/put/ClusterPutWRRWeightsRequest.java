@@ -82,8 +82,8 @@ public class ClusterPutWRRWeightsRequest extends AcknowledgedRequest<ClusterPutW
             Object attrValue;
             String attributeName =null;
             Map<String, Object> weights = new HashMap<>();
-//            XContentParser.Token token ;
-//            parser.nextToken();
+            String awarenessField = null;
+
 
 
             XContentParser.Token token;
@@ -91,23 +91,28 @@ public class ClusterPutWRRWeightsRequest extends AcknowledgedRequest<ClusterPutW
             parser.nextToken();
             while ((token = parser.nextToken()) != XContentParser.Token.END_OBJECT) {
                 if (token == XContentParser.Token.FIELD_NAME) {
-                    attributeName = parser.currentName();
-                }
-                else if (token == XContentParser.Token.START_OBJECT){
-                    while((token=parser.nextToken())!=XContentParser.Token.END_OBJECT)
-                    {
-                        if( token == XContentParser.Token.FIELD_NAME)
-                        {
-                            attrKey = parser.currentName();
-                        }
-                        else if (token == XContentParser.Token.VALUE_STRING)
-                        {
-                            attrValue = parser.text();
-                            weights.put(attrKey, attrValue);
-                        }
+                    awarenessField = parser.currentName();
+                    if (parser.nextToken() != XContentParser.Token.START_OBJECT) {
+                        throw new OpenSearchParseException("failed to parse wrr metadata  [{}], expected object", awarenessField);
                     }
+                    while ((token = parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+                        attributeName = parser.currentName();
+                        if (parser.nextToken() != XContentParser.Token.START_OBJECT) {
+                            throw new OpenSearchParseException("failed to parse wrr metadata  [{}], expected object", attributeName);
+                        }
 
-
+                        while ((token = parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+                            if (token == XContentParser.Token.FIELD_NAME) {
+                                attrKey = parser.currentName();
+                            } else if (token == XContentParser.Token.VALUE_STRING) {
+                                attrValue = parser.text();
+                                weights.put(attrKey, attrValue);
+                            } else {
+                                throw new OpenSearchParseException("failed to parse wrr metadata attribute [{}], unknown type", attributeName);
+                            }
+                        }
+                    }} else {
+                    throw new OpenSearchParseException("failed to parse wrr metadata attribute [{}]", attributeName);
                 }
             }
             this.wrrWeight = new WRRWeight(attributeName, weights);
@@ -149,13 +154,14 @@ public class ClusterPutWRRWeightsRequest extends AcknowledgedRequest<ClusterPutW
 //        }
 //        this.wrrWeight = new WRRWeight(attributeName, weights);
 
-        for(Map.Entry<String, ?> entry : source.entrySet()) {
-
-            if(!(entry.getValue() instanceof Map)) {
-                throw new OpenSearchParseException("key [ awareness] must be an object" );
-            }
-            setWRRWeight((Map<String,Object>) entry.getValue());
-        }
+//        for(Map.Entry<String, ?> entry : source.entrySet()) {
+//
+//            if(!(entry.getValue() instanceof Map)) {
+//                throw new OpenSearchParseException("key [ awareness] must be an object" );
+//            }
+            //setWRRWeight((Map<String,Object>) entry.getValue());
+            setWRRWeight(source);
+//        }
         return this;
 
 
