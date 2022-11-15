@@ -57,6 +57,7 @@ import org.opensearch.rest.RestResponse;
 import org.opensearch.rest.RestStatus;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
 
 import static org.opensearch.index.query.AbstractQueryBuilder.parseInnerQueryBuilder;
@@ -127,6 +128,13 @@ public class RestActions {
             builder.endArray();
         }
         builder.endObject();
+    }
+
+    public static <NodeResponse extends BaseNodeResponse> void buildWeightedRoutingEtagHeader(XContentBuilder builder,
+                                                      long version
+                                                      ) throws IOException {
+        builder.field("headers", new HashMap<>().put("_version", version));
+
     }
 
     /**

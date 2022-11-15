@@ -37,7 +37,7 @@ public class WeightedRoutingMetadata extends AbstractNamedDiffable<Metadata.Cust
     public static final String TYPE = "weighted_shard_routing";
     public static final String AWARENESS = "awareness";
     public static final String VERSION = "_version";
-    public static final long INITIAL_VERSION = 0;
+    public static final long INITIAL_VERSION = 1;
 
     public long getVersion() {
         return version;

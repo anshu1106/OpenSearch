@@ -32,9 +32,18 @@ import static org.opensearch.common.xcontent.XContentParserUtils.ensureExpectedT
  * @opensearch.internal
  */
 public class ClusterGetWeightedRoutingResponse extends ActionResponse implements ToXContentObject {
+    public WeightedRouting getWeightedRouting() {
+        return weightedRouting;
+    }
+
     private WeightedRouting weightedRouting;
     private String localNodeWeight;
-    private static final String NODE_WEIGHT = "node_weight";
+    public static final String NODE_WEIGHT = "node_weight";
+
+    public long getVersion() {
+        return version;
+    }
+
     private long version;
 
     public String getLocalNodeWeight() {
