@@ -181,6 +181,8 @@ public class SnapshotsService extends AbstractLifecycleComponent implements Clus
 
     private final UpdateSnapshotStatusAction updateSnapshotStatusHandler;
 
+    private final BatchUpdateSnapshotStatusAction batchUpdateSnapshotStatusHandler;
+
     private final TransportService transportService;
 
     private final OngoingRepositoryOperations repositoryOperations = new OngoingRepositoryOperations();
@@ -221,6 +223,13 @@ public class SnapshotsService extends AbstractLifecycleComponent implements Clus
 
         // The constructor of UpdateSnapshotStatusAction will register itself to the TransportService.
         this.updateSnapshotStatusHandler = new UpdateSnapshotStatusAction(
+            transportService,
+            clusterService,
+            threadPool,
+            actionFilters,
+            indexNameExpressionResolver
+        );
+        this.batchUpdateSnapshotStatusHandler = new BatchUpdateSnapshotStatusAction(
             transportService,
             clusterService,
             threadPool,
@@ -2727,6 +2736,8 @@ public class SnapshotsService extends AbstractLifecycleComponent implements Clus
     protected void doStart() {
         assert this.updateSnapshotStatusHandler != null;
         assert transportService.getRequestHandler(UPDATE_SNAPSHOT_STATUS_ACTION_NAME) != null;
+        assert this.batchUpdateSnapshotStatusHandler != null;
+        assert transportService.getRequestHandler(BATCH_UPDATE_SNAPSHOT_SHARD_STATUS_ACTION_NAME) != null;
     }
 
     @Override

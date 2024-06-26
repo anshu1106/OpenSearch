@@ -112,7 +112,7 @@ public class SnapshotShardsService extends AbstractLifecycleComponent implements
     private final Map<Snapshot, Map<ShardId, IndexShardSnapshotStatus>> shardSnapshots = new HashMap<>();
 
     private static final int BATCH_SIZE = 10;
-    private static final int BATCH_TIMEOUT_SECONDS = 10;
+    private static final int BATCH_TIMEOUT_SECONDS = 60;
 
     private final List<UpdateIndexShardSnapshotStatusRequest> batchUpdateRequests = new ArrayList<>();
     private final AtomicInteger batchCounter = new AtomicInteger(0);
@@ -149,11 +149,14 @@ public class SnapshotShardsService extends AbstractLifecycleComponent implements
     protected void doStart() {}
 
     @Override
-    protected void doStop() {}
+    protected void doStop() {
+        shutdown();
+    }
 
     @Override
     protected void doClose() {
         clusterService.removeListener(this);
+        shutdown();
     }
 
     @Override
@@ -599,46 +602,7 @@ public class SnapshotShardsService extends AbstractLifecycleComponent implements
 
     /** Updates the shard snapshot status by sending a {@link UpdateIndexShardSnapshotStatusRequest} to the cluster-manager node */
     private void sendSnapshotShardUpdate(final Snapshot snapshot, final ShardId shardId, final ShardSnapshotStatus status) {
-        // remoteFailedRequestDeduplicator.executeOnce(
-        // new UpdateIndexShardSnapshotStatusRequest(snapshot, shardId, status),
-        // new ActionListener<Void>() {
-        // @Override
-        // public void onResponse(Void aVoid) {
-        // logger.trace("[{}] [{}] updated snapshot state", snapshot, status);
-        // }
-        //
-        // @Override
-        // public void onFailure(Exception e) {
-        // logger.warn(() -> new ParameterizedMessage("[{}] [{}] failed to update snapshot state", snapshot, status), e);
-        // }
-        // },
-        // (req, reqListener) -> transportService.sendRequest(
-        // transportService.getLocalNode(),
-        // SnapshotsService.UPDATE_SNAPSHOT_STATUS_ACTION_NAME,
-        // req,
-        // new TransportResponseHandler<UpdateIndexShardSnapshotStatusResponse>() {
-        // @Override
-        // public UpdateIndexShardSnapshotStatusResponse read(StreamInput in) {
-        // return UpdateIndexShardSnapshotStatusResponse.INSTANCE;
-        // }
-        //
-        // @Override
-        // public void handleResponse(UpdateIndexShardSnapshotStatusResponse response) {
-        // reqListener.onResponse(null);
-        // }
-        //
-        // @Override
-        // public void handleException(TransportException exp) {
-        // reqListener.onFailure(exp);
-        // }
-        //
-        // @Override
-        // public String executor() {
-        // return ThreadPool.Names.SAME;
-        // }
-        // }
-        // )
-        // );
+
         synchronized (batchUpdateRequests) {
             batchUpdateRequests.add(new UpdateIndexShardSnapshotStatusRequest(snapshot, shardId, status));
             if (batchCounter.incrementAndGet() >= BATCH_SIZE) {
@@ -659,32 +623,6 @@ public class SnapshotShardsService extends AbstractLifecycleComponent implements
             batchCounter.set(0);
         }
         UpdateShardSnapshotStatusBatchRequest batchRequest = new UpdateShardSnapshotStatusBatchRequest(requestsToSend);
-        // transportService.sendRequest(
-        // transportService.getLocalNode(),
-        // SnapshotsService.BATCH_UPDATE_SNAPSHOT_SHARD_STATUS_ACTION_NAME,
-        // batchRequest,
-        // new TransportResponseHandler<UpdateIndexShardSnapshotStatusResponse>() {
-        // @Override
-        // public UpdateIndexShardSnapshotStatusResponse read(StreamInput in) {
-        // return UpdateIndexShardSnapshotStatusResponse.INSTANCE;
-        // }
-        //
-        // @Override
-        // public void handleResponse(UpdateIndexShardSnapshotStatusResponse response) {
-        // reqListener.onResponse(null);
-        // }
-        //
-        // @Override
-        // public void handleException(TransportException exp) {
-        // reqListener.onFailure(exp);
-        // }
-        //
-        // @Override
-        // public String executor() {
-        // return ThreadPool.Names.SAME;
-        // }
-        // }
-        // );
 
         remoteFailedRequestDeduplicatorForBatch.executeOnce(batchRequest, new ActionListener<Void>() {
             @Override
