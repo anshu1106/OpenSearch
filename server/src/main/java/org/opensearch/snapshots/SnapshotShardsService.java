@@ -75,9 +75,15 @@ import org.opensearch.transport.TransportService;
 
 import java.io.IOException;
 import java.nio.file.NoSuchFileException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -105,8 +111,19 @@ public class SnapshotShardsService extends AbstractLifecycleComponent implements
 
     private final Map<Snapshot, Map<ShardId, IndexShardSnapshotStatus>> shardSnapshots = new HashMap<>();
 
+    private static final int BATCH_SIZE = 10;
+    private static final int BATCH_TIMEOUT_SECONDS = 10;
+
+    private final List<UpdateIndexShardSnapshotStatusRequest> batchUpdateRequests = new ArrayList<>();
+    private final AtomicInteger batchCounter = new AtomicInteger(0);
+
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+
     // A map of snapshots to the shardIds that we already reported to the cluster-manager as failed
     private final TransportRequestDeduplicator<UpdateIndexShardSnapshotStatusRequest> remoteFailedRequestDeduplicator =
+        new TransportRequestDeduplicator<>();
+
+    private final TransportRequestDeduplicator<UpdateShardSnapshotStatusBatchRequest> remoteFailedRequestDeduplicatorForBatch =
         new TransportRequestDeduplicator<>();
 
     public SnapshotShardsService(
@@ -125,6 +142,7 @@ public class SnapshotShardsService extends AbstractLifecycleComponent implements
             // this is only useful on the nodes that can hold data
             clusterService.addListener(this);
         }
+        scheduler.scheduleAtFixedRate(this::sendBatchSnapshotShardUpdate, BATCH_TIMEOUT_SECONDS, BATCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     }
 
     @Override
@@ -520,6 +538,7 @@ public class SnapshotShardsService extends AbstractLifecycleComponent implements
         // Clear request deduplicator since we need to send all requests that were potentially not handled by the previous
         // cluster-manager again
         remoteFailedRequestDeduplicator.clear();
+        remoteFailedRequestDeduplicatorForBatch.clear();
         for (SnapshotsInProgress.Entry snapshot : snapshotsInProgress.entries()) {
             if (snapshot.state() == State.STARTED || snapshot.state() == State.ABORTED) {
                 Map<ShardId, IndexShardSnapshotStatus> localShards = currentSnapshotShards(snapshot.snapshot());
@@ -580,23 +599,108 @@ public class SnapshotShardsService extends AbstractLifecycleComponent implements
 
     /** Updates the shard snapshot status by sending a {@link UpdateIndexShardSnapshotStatusRequest} to the cluster-manager node */
     private void sendSnapshotShardUpdate(final Snapshot snapshot, final ShardId shardId, final ShardSnapshotStatus status) {
-        remoteFailedRequestDeduplicator.executeOnce(
-            new UpdateIndexShardSnapshotStatusRequest(snapshot, shardId, status),
-            new ActionListener<Void>() {
-                @Override
-                public void onResponse(Void aVoid) {
-                    logger.trace("[{}] [{}] updated snapshot state", snapshot, status);
-                }
+        // remoteFailedRequestDeduplicator.executeOnce(
+        // new UpdateIndexShardSnapshotStatusRequest(snapshot, shardId, status),
+        // new ActionListener<Void>() {
+        // @Override
+        // public void onResponse(Void aVoid) {
+        // logger.trace("[{}] [{}] updated snapshot state", snapshot, status);
+        // }
+        //
+        // @Override
+        // public void onFailure(Exception e) {
+        // logger.warn(() -> new ParameterizedMessage("[{}] [{}] failed to update snapshot state", snapshot, status), e);
+        // }
+        // },
+        // (req, reqListener) -> transportService.sendRequest(
+        // transportService.getLocalNode(),
+        // SnapshotsService.UPDATE_SNAPSHOT_STATUS_ACTION_NAME,
+        // req,
+        // new TransportResponseHandler<UpdateIndexShardSnapshotStatusResponse>() {
+        // @Override
+        // public UpdateIndexShardSnapshotStatusResponse read(StreamInput in) {
+        // return UpdateIndexShardSnapshotStatusResponse.INSTANCE;
+        // }
+        //
+        // @Override
+        // public void handleResponse(UpdateIndexShardSnapshotStatusResponse response) {
+        // reqListener.onResponse(null);
+        // }
+        //
+        // @Override
+        // public void handleException(TransportException exp) {
+        // reqListener.onFailure(exp);
+        // }
+        //
+        // @Override
+        // public String executor() {
+        // return ThreadPool.Names.SAME;
+        // }
+        // }
+        // )
+        // );
+        synchronized (batchUpdateRequests) {
+            batchUpdateRequests.add(new UpdateIndexShardSnapshotStatusRequest(snapshot, shardId, status));
+            if (batchCounter.incrementAndGet() >= BATCH_SIZE) {
+                sendBatchSnapshotShardUpdate();
+                batchCounter.set(0);
+            }
+        }
+    }
 
-                @Override
-                public void onFailure(Exception e) {
-                    logger.warn(() -> new ParameterizedMessage("[{}] [{}] failed to update snapshot state", snapshot, status), e);
-                }
-            },
+    private void sendBatchSnapshotShardUpdate() {
+        List<UpdateIndexShardSnapshotStatusRequest> requestsToSend;
+        synchronized (batchUpdateRequests) {
+            if (batchUpdateRequests.isEmpty()) {
+                return;
+            }
+            requestsToSend = new ArrayList<>(batchUpdateRequests);
+            batchUpdateRequests.clear();
+            batchCounter.set(0);
+        }
+        UpdateShardSnapshotStatusBatchRequest batchRequest = new UpdateShardSnapshotStatusBatchRequest(requestsToSend);
+        // transportService.sendRequest(
+        // transportService.getLocalNode(),
+        // SnapshotsService.BATCH_UPDATE_SNAPSHOT_SHARD_STATUS_ACTION_NAME,
+        // batchRequest,
+        // new TransportResponseHandler<UpdateIndexShardSnapshotStatusResponse>() {
+        // @Override
+        // public UpdateIndexShardSnapshotStatusResponse read(StreamInput in) {
+        // return UpdateIndexShardSnapshotStatusResponse.INSTANCE;
+        // }
+        //
+        // @Override
+        // public void handleResponse(UpdateIndexShardSnapshotStatusResponse response) {
+        // reqListener.onResponse(null);
+        // }
+        //
+        // @Override
+        // public void handleException(TransportException exp) {
+        // reqListener.onFailure(exp);
+        // }
+        //
+        // @Override
+        // public String executor() {
+        // return ThreadPool.Names.SAME;
+        // }
+        // }
+        // );
+
+        remoteFailedRequestDeduplicatorForBatch.executeOnce(batchRequest, new ActionListener<Void>() {
+            @Override
+            public void onResponse(Void aVoid) {
+                logger.trace("[{}] [{}] updated snapshot batch state");
+            }
+
+            @Override
+            public void onFailure(Exception e) {
+                logger.warn(() -> new ParameterizedMessage("[{}] [{}] failed to update snapshot state"), e);
+            }
+        },
             (req, reqListener) -> transportService.sendRequest(
                 transportService.getLocalNode(),
-                SnapshotsService.UPDATE_SNAPSHOT_STATUS_ACTION_NAME,
-                req,
+                SnapshotsService.BATCH_UPDATE_SNAPSHOT_SHARD_STATUS_ACTION_NAME,
+                batchRequest,
                 new TransportResponseHandler<UpdateIndexShardSnapshotStatusResponse>() {
                     @Override
                     public UpdateIndexShardSnapshotStatusResponse read(StreamInput in) {
@@ -621,4 +725,16 @@ public class SnapshotShardsService extends AbstractLifecycleComponent implements
             )
         );
     }
+
+    public void shutdown() {
+        scheduler.shutdown();
+        try {
+            if (!scheduler.awaitTermination(60, TimeUnit.SECONDS)) {
+                scheduler.shutdown();
+            }
+        } catch (InterruptedException e) {
+            scheduler.shutdown();
+        }
+    }
+
 }
