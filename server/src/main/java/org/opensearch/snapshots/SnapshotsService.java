@@ -782,6 +782,10 @@ public class SnapshotsService extends AbstractLifecycleComponent implements Clus
                         "Can't clone index [" + indexId + "] because its snapshot was not successful."
                     );
                 }
+                if (snapshotInfo.getPinnedTimestamp() > 0) {
+                    // TODO: check that the timestamp was pinned successfully for the snapshot
+                    // TODO: fail if there isn't a pinned timestamp for the source snapshot
+                }
             }
             // 2. step, load the number of shards we have in each index to be cloned from the index metadata.
             repository.getRepositoryData(ActionListener.wrap(repositoryData -> {
@@ -2438,7 +2442,7 @@ public class SnapshotsService extends AbstractLifecycleComponent implements Clus
     ) {
         if (repositoryOperations.startDeletion(deleteEntry.uuid())) {
             assert currentlyFinalizing.contains(deleteEntry.repository());
-            final List<SnapshotId> snapshotIds = deleteEntry.getSnapshots();
+            List<SnapshotId> snapshotIds = deleteEntry.getSnapshots();
             assert deleteEntry.state() == SnapshotDeletionsInProgress.State.STARTED : "incorrect state for entry [" + deleteEntry + "]";
             final Repository repository = repositoriesService.repository(deleteEntry.repository());
 
@@ -2449,16 +2453,44 @@ public class SnapshotsService extends AbstractLifecycleComponent implements Clus
             // SEE https://github.com/opensearch-project/OpenSearch/issues/8610
             final boolean cleanupRemoteStoreLockFiles = REMOTE_STORE_INDEX_SHALLOW_COPY.get(repository.getMetadata().settings());
             if (cleanupRemoteStoreLockFiles) {
-                repository.deleteSnapshotsAndReleaseLockFiles(
-                    snapshotIds,
-                    repositoryData.getGenId(),
-                    minCompatibleVersion(minNodeVersion, repositoryData, snapshotIds),
-                    remoteStoreLockManagerFactory,
-                    ActionListener.wrap(updatedRepoData -> {
-                        logger.info("snapshots {} deleted", snapshotIds);
-                        removeSnapshotDeletionFromClusterState(deleteEntry, null, updatedRepoData);
-                    }, ex -> removeSnapshotDeletionFromClusterState(deleteEntry, ex, repositoryData))
-                );
+                List<SnapshotId> snapshotsWithPinnedTimestamp = new ArrayList<>();
+                List<SnapshotId> snapshotsWithLockFiles = new ArrayList<>();
+
+                for (SnapshotId snapshotId : snapshotIds) {
+                    SnapshotInfo snapshotInfo = repository.getSnapshotInfo(snapshotId);
+                    if (snapshotInfo.getPinnedTimestamp() > 0) {
+                        snapshotsWithPinnedTimestamp.add(snapshotId);
+
+                    } else {
+                        snapshotsWithLockFiles.add(snapshotId);
+                    }
+                }
+                if (snapshotsWithLockFiles.size() > 0) {
+                    repository.deleteSnapshotsAndReleaseLockFiles(
+                        snapshotIds,
+                        repositoryData.getGenId(),
+                        minCompatibleVersion(minNodeVersion, repositoryData, snapshotIds),
+                        remoteStoreLockManagerFactory,
+                        ActionListener.wrap(updatedRepoData -> {
+                            logger.info("snapshots {} deleted", snapshotsWithLockFiles);
+                            removeSnapshotDeletionFromClusterState(deleteEntry, null, updatedRepoData);
+                        }, ex -> removeSnapshotDeletionFromClusterState(deleteEntry, ex, repositoryData))
+                    );
+                }
+                if (snapshotsWithPinnedTimestamp.size() > 0) {
+                    repository.deleteSnapshotsAndReleaseLockFiles(
+                        snapshotIds,
+                        repositoryData.getGenId(),
+                        minCompatibleVersion(minNodeVersion, repositoryData, snapshotIds),
+                        null,
+                        ActionListener.wrap(updatedRepoData -> {
+                            logger.info("snapshots {} deleted", snapshotsWithPinnedTimestamp);
+                            removeSnapshotDeletionFromClusterState(deleteEntry, null, updatedRepoData);
+                            // TODO : remove pinned timestamp
+                        }, ex -> removeSnapshotDeletionFromClusterState(deleteEntry, ex, repositoryData))
+                    );
+                }
+
             } else {
                 repository.deleteSnapshots(
                     snapshotIds,

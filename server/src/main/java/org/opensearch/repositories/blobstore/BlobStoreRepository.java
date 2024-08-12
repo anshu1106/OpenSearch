@@ -792,7 +792,7 @@ public abstract class BlobStoreRepository extends AbstractLifecycleComponent imp
      * maintains single lazy instance of {@link BlobContainer}
      */
     protected BlobContainer blobContainer() {
-        assertSnapshotOrGenericThread();
+        // assertSnapshotOrGenericThread();
 
         BlobContainer blobContainer = this.blobContainer.get();
         if (blobContainer == null) {

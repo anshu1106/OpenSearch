@@ -10,10 +10,12 @@ package org.opensearch.remotestore;
 
 import org.opensearch.action.DocWriteResponse;
 import org.opensearch.action.admin.cluster.remotestore.restore.RestoreRemoteStoreRequest;
+import org.opensearch.action.admin.cluster.snapshots.create.CreateSnapshotResponse;
 import org.opensearch.action.admin.cluster.snapshots.restore.RestoreSnapshotResponse;
 import org.opensearch.action.admin.indices.delete.DeleteIndexRequest;
 import org.opensearch.action.delete.DeleteResponse;
 import org.opensearch.action.support.PlainActionFuture;
+import org.opensearch.action.support.master.AcknowledgedResponse;
 import org.opensearch.client.Client;
 import org.opensearch.client.Requests;
 import org.opensearch.cluster.ClusterState;
@@ -22,6 +24,7 @@ import org.opensearch.common.Nullable;
 import org.opensearch.common.blobstore.BlobPath;
 import org.opensearch.common.io.PathUtils;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.common.unit.TimeValue;
 import org.opensearch.common.util.io.IOUtils;
 import org.opensearch.core.index.Index;
 import org.opensearch.core.rest.RestStatus;
@@ -46,7 +49,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -749,13 +751,109 @@ public class RemoteRestoreSnapshotIT extends AbstractSnapshotIntegTestCase {
 
     public void testCreateShallowCopyV2() throws Exception {
 
-        Settings snapshotSettings = Settings.builder().put("snapshot.shallow_snapshot_v2", true).build();
+        // Settings snapshotSettings = Settings.builder().put("snapshot.shallow_snapshot_v2", true).build();
+        Settings snapshotSettings = Settings.builder().put("snapshot.max_concurrent_operations", 1000).build();
         internalCluster().startClusterManagerOnlyNode(Settings.builder().put(snapshotSettings).build());
         internalCluster().startDataOnlyNode(Settings.builder().put(snapshotSettings).build());
         String indexName1 = "testindex1";
         String indexName2 = "testindex2";
         String snapshotRepoName = "test-create-snapshot-repo";
         String snapshotName1 = "test-create-snapshot1";
+        Path absolutePath1 = randomRepoPath().toAbsolutePath();
+        logger.info("Snapshot Path [{}]", absolutePath1);
+        String restoredIndexName1 = indexName1 + "-restored";
+
+        createRepository(snapshotRepoName, "fs", getRepositorySettings(absolutePath1, true));
+
+        // final FsRepository repository = new FsRepository(
+        // repositoryMetadata,
+        // createEnvironment(),
+        // xContentRegistry(),
+        // clusterService,
+        // new RecoverySettings(Settings.EMPTY, new ClusterSettings(Settings.EMPTY, ClusterSettings.BUILT_IN_CLUSTER_SETTINGS))
+        // ) {
+        // @Override
+        // protected void assertSnapshotOrGenericThread() {
+        // // eliminate thread name check as we create repo manually
+        // }
+        // };
+
+        Client client = client();
+        Settings indexSettings = getIndexSettings(20, 0).build();
+        createIndex(indexName1, indexSettings);
+
+        Settings indexSettings2 = getIndexSettings(15, 0).build();
+        createIndex(indexName2, indexSettings2);
+
+        final int numDocsInIndex1 = 10;
+        final int numDocsInIndex2 = 20;
+        indexDocuments(client, indexName1, numDocsInIndex1);
+        indexDocuments(client, indexName2, numDocsInIndex2);
+        ensureGreen(indexName1, indexName2);
+
+        internalCluster().startDataOnlyNode(Settings.builder().put(snapshotSettings).build());
+        logger.info("--> snapshot");
+        internalCluster().clusterService().state().getMetadata().customs();
+
+        // SnapshotInfo snapshotInfo = createSnapshot(snapshotRepoName, snapshotName1, Collections.emptyList());
+        CreateSnapshotResponse createSnapshotResponse = client().admin()
+            .cluster()
+            .prepareCreateSnapshot(snapshotRepoName, snapshotName1)
+            .setWaitForCompletion(true)
+            .get();
+        SnapshotInfo snapshotInfo = createSnapshotResponse.getSnapshotInfo();
+        assertThat(snapshotInfo.state(), equalTo(SnapshotState.SUCCESS));
+        assertThat(snapshotInfo.successfulShards(), greaterThan(0));
+        assertThat(snapshotInfo.successfulShards(), equalTo(snapshotInfo.totalShards()));
+        assertThat(snapshotInfo.snapshotId().getName(), equalTo(snapshotName1));
+
+        AcknowledgedResponse cloneResponse = client().admin()
+            .cluster()
+            .prepareCloneSnapshot(snapshotRepoName, snapshotName1, "test_clone_snapshot")
+            .setIndices(indexName1)
+            .setClusterManagerNodeTimeout(TimeValue.timeValueSeconds(60))
+            .get();
+        // Thread.sleep(2000000);
+        // startDeleteSnapshot(snapshotRepoName,snapshotName1);
+        // DeleteSnapshotRequest request = new DeleteSnapshotRequest(snapshotRepoName, snapshotName1);
+        internalCluster().clusterService().state().getMetadata().customs();
+        AcknowledgedResponse deleteResponse = client().admin()
+            .cluster()
+            .prepareDeleteSnapshot(snapshotRepoName, snapshotName1)
+            .setSnapshots(snapshotName1)
+            .get();
+        // AcknowledgedResponse response = execute(request, highLevelClient().snapshot()::delete,
+        // highLevelClient().snapshot()::deleteAsync);
+
+        // // delete indices
+        // DeleteResponse deleteResponse = client().prepareDelete(indexName1, "0").execute().actionGet();
+        // assertEquals(deleteResponse.getResult(), DocWriteResponse.Result.DELETED);
+        // RestoreSnapshotResponse restoreSnapshotResponse1 = client.admin()
+        // .cluster()
+        // .prepareRestoreSnapshot(snapshotRepoName, snapshotName1)
+        // .setWaitForCompletion(false)
+        // .setIndices(indexName1)
+        // .setRenamePattern(indexName1)
+        // .setRenameReplacement(restoredIndexName1)
+        // .get();
+        //
+        // assertEquals(restoreSnapshotResponse1.status(), RestStatus.ACCEPTED);
+        // ensureYellowAndNoInitializingShards(restoredIndexName1);
+        // ensureGreen(restoredIndexName1);
+        // assertDocsPresentInIndex(client(), restoredIndexName1, numDocsInIndex1);
+    }
+
+    public void testDeleteShallowCopyV2() throws Exception {
+
+        Settings snapshotSettings = Settings.builder().put("snapshot.shallow_snapshot_v2", true).build();
+        // Settings snapshotSettings = Settings.builder().put("snapshot.max_concurrent_operations", 1000).build();
+        internalCluster().startClusterManagerOnlyNode(Settings.builder().put(snapshotSettings).build());
+        internalCluster().startDataOnlyNode(Settings.builder().put(snapshotSettings).build());
+        String indexName1 = "testindex1";
+        String indexName2 = "testindex2";
+        String snapshotRepoName = "test-create-snapshot-repo";
+        String snapshotName1 = "test-create-snapshot1";
+        String snapshotName2 = "test-create-snapshot2";
         Path absolutePath1 = randomRepoPath().toAbsolutePath();
         logger.info("Snapshot Path [{}]", absolutePath1);
         String restoredIndexName1 = indexName1 + "-restored";
@@ -777,11 +875,47 @@ public class RemoteRestoreSnapshotIT extends AbstractSnapshotIntegTestCase {
 
         internalCluster().startDataOnlyNode(Settings.builder().put(snapshotSettings).build());
         logger.info("--> snapshot");
+        internalCluster().clusterService().state().getMetadata().customs();
 
-        SnapshotInfo snapshotInfo = createSnapshot(snapshotRepoName, snapshotName1, Collections.emptyList());
+        // SnapshotInfo snapshotInfo = createSnapshot(snapshotRepoName, snapshotName1, Collections.emptyList());
+        CreateSnapshotResponse createSnapshotResponse = client().admin()
+            .cluster()
+            .prepareCreateSnapshot(snapshotRepoName, snapshotName1)
+            .setWaitForCompletion(true)
+            .get();
+        SnapshotInfo snapshotInfo = createSnapshotResponse.getSnapshotInfo();
         assertThat(snapshotInfo.state(), equalTo(SnapshotState.SUCCESS));
         assertThat(snapshotInfo.successfulShards(), greaterThan(0));
         assertThat(snapshotInfo.successfulShards(), equalTo(snapshotInfo.totalShards()));
+        assertThat(snapshotInfo.snapshotId().getName(), equalTo(snapshotName1));
+
+        indexDocuments(client, indexName2, 10);
+        indexDocuments(client, indexName1, 10);
+
+        CreateSnapshotResponse createSnapshotResponse2 = client().admin()
+            .cluster()
+            .prepareCreateSnapshot(snapshotRepoName, snapshotName2)
+            .setWaitForCompletion(true)
+            .get();
+        snapshotInfo = createSnapshotResponse2.getSnapshotInfo();
+        assertThat(snapshotInfo.state(), equalTo(SnapshotState.SUCCESS));
+        assertThat(snapshotInfo.successfulShards(), greaterThan(0));
+        assertThat(snapshotInfo.successfulShards(), equalTo(snapshotInfo.totalShards()));
+        assertThat(snapshotInfo.snapshotId().getName(), equalTo(snapshotName2));
+
+        // AcknowledgedResponse cloneResponse = client().admin().cluster().prepareCloneSnapshot(snapshotRepoName,snapshotName1,
+        // "test_clone_snapshot").setIndices(indexName1).setClusterManagerNodeTimeout(TimeValue.timeValueSeconds(60)).get();
+        // Thread.sleep(2000000);
+        // startDeleteSnapshot(snapshotRepoName,snapshotName1);
+        // DeleteSnapshotRequest request = new DeleteSnapshotRequest(snapshotRepoName, snapshotName1);
+        internalCluster().clusterService().state().getMetadata().customs();
+        AcknowledgedResponse deleteResponse = client().admin()
+            .cluster()
+            .prepareDeleteSnapshot(snapshotRepoName, snapshotName2)
+            .setSnapshots(snapshotName2)
+            .get();
+        // AcknowledgedResponse response = execute(request, highLevelClient().snapshot()::delete,
+        // highLevelClient().snapshot()::deleteAsync);
 
         // // delete indices
         // DeleteResponse deleteResponse = client().prepareDelete(indexName1, "0").execute().actionGet();
